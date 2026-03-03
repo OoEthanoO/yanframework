@@ -1,0 +1,24 @@
+# Build
+build/
+cmake-build-*/
+
+# Compiled Metal shaders
+*.air
+*.metallib
+
+# IDE
+.vscode/
+.idea/
+*.xcodeproj/
+*.xcworkspace/
+xcuserdata/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Compiled objects
+*.o
+*.a
+*.dylib
+*.so
