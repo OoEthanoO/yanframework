@@ -17,6 +17,7 @@ if(USE_CUDA)
     target_compile_definitions(yanframework_core PUBLIC YAN_USE_CUDA)
     target_include_directories(yanframework_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
     target_link_libraries(yanframework_core CUDA::cudart)
+    target_compile_options(yanframework_core PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:-arch=sm_70>)
 else()
     # Metal Shaders
     set(METAL_SHADER ${CMAKE_CURRENT_SOURCE_DIR}/src/metal/kernels.metal)

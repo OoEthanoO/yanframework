@@ -296,9 +296,10 @@ Tensor Tensor::matmul(const Tensor &other) const {
 #ifdef YAN_USE_CUDA
   else if (device == Device::CUDA && other.device == Device::CUDA) {
     result.to(Device::CUDA);
-    cuda::launch_matmul(static_cast<const float *>(cuda_buffer),
-                        static_cast<const float *>(other.cuda_buffer),
-                        static_cast<float *>(result.cuda_buffer), M, K, N);
+    cuda::launch_matmul_tensor_core(
+        static_cast<const float *>(cuda_buffer),
+        static_cast<const float *>(other.cuda_buffer),
+        static_cast<float *>(result.cuda_buffer), M, K, N);
     cudaDeviceSynchronize();
     result.to(Device::CPU);
     result.to(Device::CUDA);

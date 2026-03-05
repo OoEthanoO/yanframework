@@ -17,6 +17,8 @@ void __syncthreads();
 #if __has_include(<cuda_runtime.h>)
 #include <cuda_runtime.h>
 #endif
+#include <cuda_fp16.h>
+#include <mma.h>
 #endif
 
 namespace yan {
@@ -143,8 +145,94 @@ __global__ void transpose_kernel(const float *in, float *out, size_t rows,
   }
 }
 
+#ifdef __CUDACC__
+using namespace nvcuda;
+
+__global__ void matmul_tensor_core_kernel(const float *A, const float *B,
+                                          float *C, size_t M, size_t K,
+                                          size_t N) {
+  const int WMMA_M = 16;
+  const int WMMA_N = 16;
+  const int WMMA_K = 16;
+
+  __shared__ half A_shmem[WMMA_M][WMMA_K];
+  __shared__ half B_shmem[WMMA_K][WMMA_N];
+
+  size_t row_tile = blockIdx.y;
+  size_t col_tile = blockIdx.x;
+
+  wmma::fragment<wmma::accumulator, WMMA_M, WMMA_N, WMMA_K, float> c_frag;
+  wmma::fill_fragment(c_frag, 0.0f);
+
+  for (size_t t = 0; t < (K + WMMA_K - 1) / WMMA_K; ++t) {
+    for (int i = 0; i < 8; ++i) {
+      int idx = threadIdx.x * 8 + i;
+      int r = idx / 16;
+      int c = idx % 16;
+
+      size_t a_row = row_tile * WMMA_M + r;
+      size_t a_col = t * WMMA_K + c;
+      if (a_row < M && a_col < K) {
+        A_shmem[r][c] = __float2half(A[a_row * K + a_col]);
+      } else {
+        A_shmem[r][c] = __float2half(0.0f);
+      }
+
+      size_t b_row = t * WMMA_K + r;
+      size_t b_col = col_tile * WMMA_N + c;
+      if (b_row < K && b_col < N) {
+        B_shmem[r][c] = __float2half(B[b_row * N + b_col]);
+      } else {
+        B_shmem[r][c] = __float2half(0.0f);
+      }
+    }
+
+    __syncthreads();
+
+    wmma::fragment<wmma::matrix_a, WMMA_M, WMMA_N, WMMA_K, half,
+                   wmma::row_major>
+        a_frag;
+    wmma::fragment<wmma::matrix_b, WMMA_M, WMMA_N, WMMA_K, half,
+                   wmma::row_major>
+        b_frag;
+
+    wmma::load_matrix_sync(a_frag, &A_shmem[0][0], WMMA_K);
+    wmma::load_matrix_sync(b_frag, &B_shmem[0][0], WMMA_N);
+
+    wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
+
+    __syncthreads();
+  }
+
+  __shared__ float C_shmem[WMMA_M][WMMA_N];
+  wmma::store_matrix_sync(&C_shmem[0][0], c_frag, WMMA_N, wmma::mem_row_major);
+
+  __syncthreads();
+
+  for (int i = 0; i < 8; ++i) {
+    int idx = threadIdx.x * 8 + i;
+    int r = idx / 16;
+    int c = idx % 16;
+    size_t c_row = row_tile * WMMA_M + r;
+    size_t c_col = col_tile * WMMA_N + c;
+    if (c_row < M && c_col < N) {
+      C[c_row * N + c_col] = C_shmem[r][c];
+    }
+  }
+}
+#endif
+
 // Launcher functions
 #ifdef __CUDACC__
+void launch_matmul_tensor_core(const float *A, const float *B, float *C,
+                               size_t M, size_t K, size_t N) {
+  const int WMMA_M = 16;
+  const int WMMA_N = 16;
+  dim3 gridDim((N + WMMA_N - 1) / WMMA_N, (M + WMMA_M - 1) / WMMA_M);
+  dim3 blockDim(32);
+  matmul_tensor_core_kernel<<<gridDim, blockDim>>>(A, B, C, M, K, N);
+}
+
 void launch_matmul(const float *A, const float *B, float *C, size_t M, size_t K,
                    size_t N) {
   dim3 threadsPerBlock(TILE_SIZE, TILE_SIZE);
@@ -215,6 +303,8 @@ void launch_transpose(const float *in, float *out, size_t rows, size_t cols) {
 }
 #else
 // Dummy launcher implementations for IDE to parse headers cleanly
+void launch_matmul_tensor_core(const float *A, const float *B, float *C,
+                               size_t M, size_t K, size_t N) {}
 void launch_matmul(const float *A, const float *B, float *C, size_t M, size_t K,
                    size_t N) {}
 void launch_add(const float *A, const float *B, float *C, size_t size) {}
