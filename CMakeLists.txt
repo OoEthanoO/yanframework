@@ -2,33 +2,50 @@ cmake_minimum_required(VERSION 3.15)
 project(yanframework VERSION 1.0 DESCRIPTION "Custom Deep Learning Framework")
 
 set(CMAKE_CXX_STANDARD 17)
-# Metal Shaders
-set(METAL_SHADER ${CMAKE_CURRENT_SOURCE_DIR}/src/metal/kernels.metal)
-set(METAL_AIR ${CMAKE_CURRENT_BINARY_DIR}/kernels.air)
-set(METAL_LIB ${CMAKE_CURRENT_BINARY_DIR}/default.metallib)
+option(USE_CUDA "Enable CUDA backend" OFF)
 
-add_custom_command(
-    OUTPUT ${METAL_LIB}
-    COMMAND xcrun -sdk macosx metal -c ${METAL_SHADER} -o ${METAL_AIR}
-    COMMAND xcrun -sdk macosx metallib ${METAL_AIR} -o ${METAL_LIB}
-    DEPENDS ${METAL_SHADER}
-    COMMENT "Compiling Metal shaders"
-)
-add_custom_target(metal_shaders ALL DEPENDS ${METAL_LIB})
+if(USE_CUDA)
+    enable_language(CUDA)
+    find_package(CUDAToolkit REQUIRED)
+    
+    add_library(yanframework_core
+        src/Tensor.cpp
+        src/NN.cpp
+        src/cuda/kernels.cu
+    )
+    
+    target_compile_definitions(yanframework_core PUBLIC YAN_USE_CUDA)
+    target_include_directories(yanframework_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_link_libraries(yanframework_core CUDA::cudart)
+else()
+    # Metal Shaders
+    set(METAL_SHADER ${CMAKE_CURRENT_SOURCE_DIR}/src/metal/kernels.metal)
+    set(METAL_AIR ${CMAKE_CURRENT_BINARY_DIR}/kernels.air)
+    set(METAL_LIB ${CMAKE_CURRENT_BINARY_DIR}/default.metallib)
 
-# Core library
-add_library(yanframework_core
-    src/Tensor.cpp
-    src/NN.cpp
-    src/metal/MetalContext.cpp
-)
-add_dependencies(yanframework_core metal_shaders)
+    add_custom_command(
+        OUTPUT ${METAL_LIB}
+        COMMAND xcrun -sdk macosx metal -c ${METAL_SHADER} -o ${METAL_AIR}
+        COMMAND xcrun -sdk macosx metallib ${METAL_AIR} -o ${METAL_LIB}
+        DEPENDS ${METAL_SHADER}
+        COMMENT "Compiling Metal shaders"
+    )
+    add_custom_target(metal_shaders ALL DEPENDS ${METAL_LIB})
 
-target_include_directories(yanframework_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
-target_include_directories(yanframework_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/ext/metal-cpp/metal-cpp)
+    # Core library
+    add_library(yanframework_core
+        src/Tensor.cpp
+        src/NN.cpp
+        src/metal/MetalContext.cpp
+    )
+    add_dependencies(yanframework_core metal_shaders)
 
-# Link Apple frameworks required by metal-cpp
-target_link_libraries(yanframework_core "-framework Metal" "-framework Foundation" "-framework QuartzCore")
+    target_include_directories(yanframework_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+    target_include_directories(yanframework_core PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/ext/metal-cpp/metal-cpp)
+
+    # Link Apple frameworks required by metal-cpp
+    target_link_libraries(yanframework_core "-framework Metal" "-framework Foundation" "-framework QuartzCore")
+endif()
 
 # Executable for Tensor test
 add_executable(tensor_test examples/tensor_test.cpp)

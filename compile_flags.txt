@@ -1,0 +1,11 @@
+-Iinclude
+-Iext/metal-cpp/metal-cpp
+-xc++
+-std=c++17
+-nocudainc
+-nocudalib
+-Wno-unknown-attributes
+-D__device__=
+-D__global__=
+-D__shared__=
+-D__host__=
